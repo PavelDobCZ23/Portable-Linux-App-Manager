@@ -82,7 +82,7 @@ read_app_config () {
   do
     # Check current config section
     if [[ $LINE =~ ^\ *\[.*\]\ *$ ]]; then #Regex that checks for characters between [] and allows spaces around
-        SECTION=$(echo "$LINE" | awk -F'[][]' '{print $2}')
+        SECTION=$(echo "$LINE" | awk -F'[][]+' '{print $2}') #if [[ "$SUBSECTION" =~ ^\ *$ ]]; then echo "Empty"; fi
         continue
     fi
     # Read Key-Value pairs
