@@ -1,11 +1,13 @@
 #!/bin/bash
 #portappm
+DATABASE_URL="https://raw.githubusercontent.com/PavelDobCZ23/Portable-Linux-App-Manager/main/database"
 APPS_DIRECTORY=""
 COMMAND=""
 APP_NAME=""
+FORCE_OPTION=false
 
 # Get cli flags
-while getopts "c:a:d:" o; do
+while getopts "fc:a:d:" o; do
   case "${o}" in
     a)
       APP_NAME="${OPTARG}"
@@ -15,6 +17,9 @@ while getopts "c:a:d:" o; do
       ;;
     d)
       APPS_DIRECTORY="${OPTARG}"
+      ;;
+    f)
+      FORCE_OPTION=true
       ;;
     *)
       echo "Fatal Error! Invalid flag '${o}' found!"
@@ -290,17 +295,34 @@ create_all_app_shortcuts () {
 add_app () {
   local NEW_APP_NAME="$1"
   if check_valid_app "$NEW_APP_NAME"; then
-    echo "App '$NEW_APP_NAME' can't be added, because already exists!"
+    echo "App '$NEW_APP_NAME' can't be added, because it already exists!"
     exit 1
   fi
+
   local NEW_APP_DIR="$APPS_DIRECTORY/$NEW_APP_NAME"
   DEFAULT_FILES_DIR="$(dirname "$(realpath "$0")")/default"
-  NEW_APP_BASENAME="$(basename "$NEW_APP_DIR")"
-
+  NEW_APP_BASENAME="$(basename "$NEW_APP_DIR")" # | tr '[:upper:]' '[:lower:]' | tr ' _' '-'
+  APP_DB_URL="$DATABASE_URL/$NEW_APP_BASENAME"
+  
   echo "Creating new app in '$NEW_APP_DIR'."
   mkdir -p "$NEW_APP_DIR"
-  cp "$DEFAULT_FILES_DIR/app.conf" "$NEW_APP_DIR/app.conf"
-  cp "$DEFAULT_FILES_DIR/app-update.sh" "$NEW_APP_DIR/app-update.sh"
+  if wget --spider -q "$APP_DB_URL/app.conf"; then # Files for apps in the database
+    echo "Name '$NEW_APP_BASENAME' found in the database. Using pre-filled files."
+    wget --content-disposition -q --show-progress "$APP_DB_URL/app.conf" -O "$NEW_APP_DIR/app.conf"
+    wget --content-disposition -q --show-progress "$APP_DB_URL/app-update.sh" -O "$NEW_APP_DIR/app-update.sh"
+    # Try to download any possible icons
+    if wget --spider -q "$APP_DB_URL/icon.svg"; then
+      wget --content-disposition -q --show-progress "$APP_DB_URL/icon.svg" -O "$NEW_APP_DIR/icon.svg"
+    elif wget --spider -q "$APP_DB_URL/icon.png"; then
+      wget --content-disposition -q --show-progress "$APP_DB_URL/icon.png" -O "$NEW_APP_DIR/icon.png"
+    elif wget --spider -q "$APP_DB_URL/icon.ico"; then
+      wget --content-disposition -q --show-progress "$APP_DB_URL/icon.ico" -O "$NEW_APP_DIR/icon.ico"
+    fi
+  else # Default empty files
+    echo "Creating default template app."
+    cp "$DEFAULT_FILES_DIR/app.conf" "$NEW_APP_DIR/app.conf"
+    cp "$DEFAULT_FILES_DIR/app-update.sh" "$NEW_APP_DIR/app-update.sh"
+  fi
   chmod +x "$NEW_APP_DIR/app-update.sh"
   return
 }
