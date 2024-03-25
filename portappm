@@ -101,6 +101,10 @@ read_app_config () {
       if [[ $KEY == "ArchiveStrip" ]];then ARCHIVE_STRIP=$VALUE;fi
       if [[ $KEY == "RemoveBeforeUpdate" ]];then RM_BEFORE_UPDATE=$VALUE;fi
       if [[ $KEY == "DisableUpdates" ]];then DISABLE_UPDATES=$VALUE;fi
+    elif [[ $SECTION == "Executable" ]]; then
+      if [[ $KEY == "Arguments" ]];then EXECUTABLE_ARGS=$VALUE;fi
+      if [[ $KEY == "EnvVariables" ]];then EXECUTABLE_ENV=$VALUE;fi
+      if [[ $KEY == "PreLaunch" ]];then EXECUTABLE_PRE_LAUNCH=$VALUE;fi
     elif [[ $SECTION == "Desktop" ]]; then
       if [[ $KEY == "Name" ]];then DESKTOP_NAME=$VALUE;fi
       if [[ $KEY == "Icon" ]];then DESKTOP_ICON=$VALUE;fi
@@ -225,8 +229,8 @@ create_app_shortcut() {
   fi
   DESKTOP_FILE_DIR="$HOME/.local/share/applications/Portable"
   APP_DESKTOP_FILE="$DESKTOP_FILE_DIR/$APP_NAME.desktop"
-  if [[ -f "$APP_DESKTOP_FILE" ]]; then
-    echo "Desktop file '$APP_DESKTOP_FILE' already exists."
+  if [[ "$FORCE_OPTION" = false && -f "$APP_DESKTOP_FILE" ]]; then
+    echo "Desktop file '$APP_DESKTOP_FILE' already exists. Use -f to force creating the shortcut."
     return 0
   fi
   # Get desktop entries
@@ -301,7 +305,7 @@ add_app () {
 
   local NEW_APP_DIR="$APPS_DIRECTORY/$NEW_APP_NAME"
   DEFAULT_FILES_DIR="$(dirname "$(realpath "$0")")/default"
-  NEW_APP_BASENAME="$(basename "$NEW_APP_DIR")" # | tr '[:upper:]' '[:lower:]' | tr ' _' '-'
+  NEW_APP_BASENAME="$(basename "$NEW_APP_DIR" | tr '[:upper:]' '[:lower:]' | tr ' _' '-')" # Gets name of the deepest directory and formats it to check in the database
   APP_DB_URL="$DATABASE_URL/$NEW_APP_BASENAME"
   
   echo "Creating new app in '$NEW_APP_DIR'."
