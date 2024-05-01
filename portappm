@@ -110,7 +110,7 @@ read_app_config () {
       if [[ $KEY == "Bin" ]];then BIN_PATH=$VALUE;fi
       if [[ $KEY == "Type" ]];then APP_TYPE=$VALUE;fi
       if [[ $KEY == "ExtractFolder" ]];then EXTRACT_FOLDER=$VALUE;fi
-      if [[ $KEY == "ArchiveStrip" ]];then ARCHIVE_STRIP=$VALUE;fi
+      if [[ $KEY == "StripArchive" ]];then ARCHIVE_STRIP=$VALUE;fi
       if [[ $KEY == "RemoveBeforeUpdate" ]];then RM_BEFORE_UPDATE=$VALUE;fi
       if [[ $KEY == "DisableUpdates" ]];then DISABLE_UPDATES=$VALUE;fi
       if [[ $KEY == "ForceVersion" ]];then FORCE_VERSION=$VALUE;fi
@@ -182,10 +182,11 @@ update_app () {
   VERSION_FILE="$APP_DIR/.version"
   INSTALLED_VERSION=$(awk 'NR==1{ print; exit }' "$VERSION_FILE") # Gets the 1st line of .version file
   RM_BEFORE_UPDATE=false
-  ARCHIVE_STRIP=0
   UPDATE_SCRIPT="$APP_DIR/app-update.sh"
   # Get variables from a config file
   read_app_config "$APP_NAME"
+  ARCHIVE_STRIP=$(get_app_config  "$APP_NAME" "General" "" "StripArchive")
+  if [[ -z $ARCHIVE_STRIP ]]; then ARCHIVE_STRIP=0; fi
   if [[ "$FORCE_OPTION" = false && "$DISABLE_UPDATES" = true ]]; then
     echo "$APP_NAME | Updates are disabled in 'app.conf' for this app. Use -f to force the update."
     return 0
@@ -241,8 +242,8 @@ update_app () {
     EXTRACT_PATH="$APP_DIR"
     if [[ -n $EXTRACT_FOLDER ]]; then EXTRACT_PATH="$APP_DIR/$EXTRACT_FOLDER"; fi
     if [[ ! -d $EXTRACT_PATH ]]; then mkdir -p "$EXTRACT_PATH"; fi
-    echo "$APP_NAME | Extracting the update archive to '$EXTRACT_PATH'. $ARCHIVE_STRIP"
-    tar -xf "$TEMP_FILE" -C "$EXTRACT_PATH" --strip-components=$ARCHIVE_STRIP --overwrite
+    echo "$APP_NAME | Extracting the update archive to '$EXTRACT_PATH'."
+    tar -xf "$TEMP_FILE" -C "$EXTRACT_PATH" --strip-components="$ARCHIVE_STRIP" --overwrite
     rm -f "$TEMP_FILE"
   else
     rm -f "$TEMP_FILE"
