@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name = Discord
+Comment = Internet thing
+Terminal = false
+NoDisplay = false
+
+[Desktop Action Test]
+Name = Some Action

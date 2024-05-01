@@ -1,0 +1,13 @@
+# This is the base for .desktop file of the app.
+# It shouldn't contain any "Exec" and "Icon" keys,
+# as these are based on "app.conf" file instead.
+# Key "Type" is automatically equal to "Application".
+# Key "Path" is generated or specified in "app.conf".
+[Desktop Entry]
+Name = Some App
+Comment = Hello world!
+Terminal = false
+NoDisplay = false
+
+[Desktop Action Test]
+Name = Some Action

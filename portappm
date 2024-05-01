@@ -1,14 +1,19 @@
 #!/bin/bash
-#portappm
-DATABASE_URL="https://raw.githubusercontent.com/PavelDobCZ23/Portable-Linux-App-Manager/main/database"
+#* portappm *#
+#* url of the github repo where is the central app database located
+DATABASE_API_URL="https://api.github.com/repos/PavelDobCZ23/Portable-Linux-App-Manager/contents/database"
+#* directory where the subdirectories of apps' files are located, value of -d arg
 APPS_DIRECTORY=""
+#* value of -c arg
 COMMAND=""
+#* global variable used to indicate the name of the app in current context, all functions should use it as their target, value of -a arg
 APP_NAME=""
+#* true when -f arg is used
 FORCE_OPTION=false
 
 # Get cli flags
-while getopts "fc:a:d:" o; do
-  case "${o}" in
+while getopts "fc:a:d:" OPT; do
+  case "${OPT}" in
     a)
       APP_NAME="${OPTARG}"
       ;;
@@ -22,8 +27,7 @@ while getopts "fc:a:d:" o; do
       FORCE_OPTION=true
       ;;
     *)
-      echo "Fatal Error! Invalid flag '${o}' found!"
-      exit 1
+      echo "Fatal Error! Invalid flag '${OPT}' found!" && exit 1
   esac
 done
 
@@ -31,16 +35,20 @@ done
 if [[ -z $APPS_DIRECTORY ]]; then APPS_DIRECTORY="$HOME/Apps"; fi
 if [[ ${APPS_DIRECTORY:0-1} == "/" ]]; then APPS_DIRECTORY="${APPS_DIRECTORY%?}"; fi
 if [[ ! -d $APPS_DIRECTORY ]]; then
-  echo "'$APPS_DIRECTORY' doesn't exist!"
-  exit 1
+  echo "'$APPS_DIRECTORY' doesn't exist!" && exit 1
 fi
 
 # # Basic functions 
+
+send_info() { echo "$APP_NAME | $1"; }
+send_error() { send_info "$1" && exit 1; }
+
 # Gets the depth of a given path
 path_depth() {
     local CHECK_PATH="$1"
     local DEPTH_COUNT=0
-    CHECK_PATH=$(echo "$CHECK_PATH" | sed 's:/*$::')
+    # shellcheck disable=SC2001
+    CHECK_PATH=$(echo "$CHECK_PATH" | sed 's/\/*$//')
     DEPTH_COUNT=$(echo "$CHECK_PATH" | awk -F'[^/]*/+' '{print NF-1}')
     if [[ DEPTH_COUNT -lt 0 ]]; then DEPTH_COUNT=0; fi
     echo "$DEPTH_COUNT"
@@ -49,8 +57,7 @@ path_depth() {
 # Removes given folder, but prevents dangerous rm -rf!
 remove_folder () {
   local REMOVE_PATH="$1"
-  if [[ $(path_depth "$REMOVE_PATH") -lt 4 ]];
-  then
+  if [[ $(path_depth "$REMOVE_PATH") -lt 3 ]]; then
     echo "Can't remove '$REMOVE_PATH', dangerous 'rm -rf' detected!"
   else
     echo "Removing '$REMOVE_PATH'."
@@ -63,79 +70,114 @@ check_valid_app () {
   local CHECK_APP_NAME="$1"
   local CHECK_APP_DIR="$APPS_DIRECTORY/$APP_NAME"
   if [[ ! -f "$CHECK_APP_DIR/app.conf" ]]; then
-    echo "$CHECK_APP_NAME | app.conf not found!"
-    return 1
-  fi;
-  if [[ ! -x "$CHECK_APP_DIR/app-update.sh" ]]; then
-    echo "$CHECK_APP_NAME | app-update.sh not found or not executable!"
-    return 1
+    echo "$CHECK_APP_NAME | app.conf not found!" && return 1
+  elif [[ ! -f "$CHECK_APP_DIR/app.desktop" ]]; then
+    echo "$CHECK_APP_NAME | app.desktop not found!" && return 1
+  elif [[ ! -x "$CHECK_APP_DIR/app-update.sh" ]]; then
+    echo "$CHECK_APP_NAME | app-update.sh not executable!" && return 1
   fi;
   return 0
 }
 
-# Reads the config file of the app and saves the configuration into variables accessible by the caller
+# Process line of a config file and emit the result with $SECTION and $SUBSECTION or $KEY and $VALUE
+process_config_line () {
+  local CONFIG_LINE="$1"
+  if [[ $CONFIG_LINE =~ ^\ *\[.*\] ]]; then # Regex that checks for characters between []
+    CONFIG_LINE=$(echo "$CONFIG_LINE" | sed 's/ *\[ */[/g; s/ *] */]/g') # Remove spaces around []
+    SECTION=$(echo "$CONFIG_LINE" | awk -F'[][]+' '{print $2}') # Get the main section
+    SUBSECTION=$(echo "$CONFIG_LINE" | awk -F'[][]+' '{print $3}') # Get the subsection
+    return 1
+  fi
+  # Read Key-Value pairs
+  KEY=$(echo "$CONFIG_LINE" | awk -F' *=' '{print $1}' | sed 's/^[[:space:]]*//')
+  if [[ -z $KEY || $CONFIG_LINE =~ ^\ *\#.*$ || ! $CONFIG_LINE =~ \= ]]; then return 1; fi # Skip an empty key, a comment or missing "="
+  VALUE=$(
+    echo "$CONFIG_LINE" | awk -F: '{n=index($0,"=");print substr($0,n+1)}' | # Splits by the 1st "=" and returns the 2nd half
+    sed 's/[[:space:]]*$//' | sed 's/^[[:space:]]*//' # Removes trailing spaces
+  )
+  return 0
+}
+
+# Reads the config file of the app and saves the configuration into global variables.
 read_app_config () {
   local CONFIG_APP_NAME="$1"
   local CONFIG_FILE="$APPS_DIRECTORY/$CONFIG_APP_NAME/app.conf"
-  local SECTION="None"
-  while IFS= read -r LINE
-  do
-    # Check current config section
-    if [[ $LINE =~ ^\ *\[.*\]\ *$ ]]; then #Regex that checks for characters between [] and allows spaces around
-        SECTION=$(echo "$LINE" | awk -F'[][]+' '{print $2}') #if [[ "$SUBSECTION" =~ ^\ *$ ]]; then echo "Empty"; fi
-        continue
-    fi
-    # Read Key-Value pairs
-    if [[ $LINE =~ ^\ *\#.*$ ]]; then continue; fi
-    KEY=$(echo "$LINE" | awk -F' *=' '{print $1}' | sed 's/^[[:space:]]*//')
-    VALUE=$(
-      echo "$LINE" | awk -F: '{ n=index($0,"=");print substr($0,n+1)}' | # Splits by the 1st "=" and returns the 2nd half
-      sed 's/[[:space:]]*$//' | sed 's/^[[:space:]]*//' # Removes trailing spaces
-    )
-    
+  local LINE=""
+  while IFS= read -r LINE; do
+    process_config_line "$LINE"
     # Save values in config into variables
-    if [[ $SECTION == "General" ]]; then
-      if [[ $KEY == "Exec" ]];then EXECUTABLE_PATH=$VALUE;fi
-      if [[ $KEY == "Type" ]];then EXECUTABLE_TYPE=$VALUE;fi
+    if [[ $SECTION == "General" && -z $SUBSECTION ]]; then
+      if [[ $KEY == "Bin" ]];then BIN_PATH=$VALUE;fi
+      if [[ $KEY == "Type" ]];then APP_TYPE=$VALUE;fi
       if [[ $KEY == "ExtractFolder" ]];then EXTRACT_FOLDER=$VALUE;fi
       if [[ $KEY == "ArchiveStrip" ]];then ARCHIVE_STRIP=$VALUE;fi
       if [[ $KEY == "RemoveBeforeUpdate" ]];then RM_BEFORE_UPDATE=$VALUE;fi
       if [[ $KEY == "DisableUpdates" ]];then DISABLE_UPDATES=$VALUE;fi
-    elif [[ $SECTION == "Executable" ]]; then
-      if [[ $KEY == "Arguments" ]];then EXECUTABLE_ARGS=$VALUE;fi
-      if [[ $KEY == "EnvVariables" ]];then EXECUTABLE_ENV=$VALUE;fi
-      if [[ $KEY == "PreLaunch" ]];then EXECUTABLE_PRE_LAUNCH=$VALUE;fi
-    elif [[ $SECTION == "Desktop" ]]; then
-      if [[ $KEY == "Name" ]];then DESKTOP_NAME=$VALUE;fi
-      if [[ $KEY == "Icon" ]];then DESKTOP_ICON=$VALUE;fi
-      if [[ $KEY == "GenericName" ]];then DESKTOP_GENERIC_NAME=$VALUE;fi
-      if [[ $KEY == "Terminal" ]];then DESKTOP_TERMINAL=$VALUE;fi
-      if [[ $KEY == "NoDisplay" ]];then DESKTOP_NO_DISPLAY=$VALUE;fi
-      if [[ $KEY == "Arguments" ]];then EXECUTABLE_ARGS=$VALUE;fi
-      if [[ $KEY == "EnvVariables" ]];then EXECUTABLE_ENV=$VALUE;fi
-      if [[ $KEY == "PreLaunch" ]];then EXECUTABLE_PRE_LAUNCH=$VALUE;fi
+      if [[ $KEY == "ForceVersion" ]];then FORCE_VERSION=$VALUE;fi
     fi
-  done < "$CONFIG_FILE"
+  done < <(grep "" "$CONFIG_FILE")
 }
 
+# Echos config entry value. Takes: app name($1), section($2), subsection($3) and key($4).
+get_app_config () {
+  local CONFIG_APP_NAME="$1"
+  local CONFIG_FILE="$APPS_DIRECTORY/$CONFIG_APP_NAME/app.conf"
+  local LINE=""
+  while IFS= read -r LINE; do
+    if ! process_config_line "$LINE"; then continue; fi
+    if [[ $SECTION == "$2" && $SUBSECTION == "$3" && $KEY == "$4" ]]; then echo "$VALUE" && return 0; fi
+  done < <(grep "" "$CONFIG_FILE")
+}
+
+# Echos executable of the app. Takes: app name($1), config subsection($2).
 get_app_executable () {
-  local ENV_STRING=""
-  read_app_config "$APP_NAME" 1>&2> /dev/null
-  if [[ -n $EXECUTABLE_ENV ]]; then
-    ENV_STRING="env $EXECUTABLE_ENV"
+  local EXEC_APP_NAME SUBSECTION BIN_PATH EXEC_ARGS EXEC_ENV EXEC_PRE_LAUNCH ENV_STRING EXEC_PATH
+  EXEC_APP_NAME="$1"
+  SUBSECTION="$2"
+  BIN_PATH=$(get_app_config "$EXEC_APP_NAME" "General" "" "Bin")
+  EXEC_ARGS=$(get_app_config "$EXEC_APP_NAME" "Desktop" "$SUBSECTION" "Arguments")
+  EXEC_ENV=$(get_app_config "$EXEC_APP_NAME" "Desktop" "$SUBSECTION" "EnvVariables")
+  EXEC_PRE_LAUNCH=$(get_app_config "$EXEC_APP_NAME" "Desktop" "$SUBSECTION" "PreLaunch")
+  if [[ -n $EXEC_ENV ]]; then ENV_STRING="env $EXEC_ENV"; fi
+  EXEC_PATH="$APPS_DIRECTORY/$EXEC_APP_NAME/$BIN_PATH"
+  echo "$ENV_STRING $EXEC_PRE_LAUNCH '$EXEC_PATH' $EXEC_ARGS"
+}
+
+# Echos icon of the app. Takes: app name($1), config subsection($2).
+get_app_icon () {
+  local ICON_APP_NAME SUBSECTION ICON_CONFIG
+  ICON_APP_NAME="$1"
+  SUBSECTION="$2"
+  ICON_CONFIG=$(get_app_config "$ICON_APP_NAME" "Desktop" "$SUBSECTION" "Icon")
+  if [[ $ICON_CONFIG =~ ^\.\/ ]]; then
+    ICON_CONFIG="$APPS_DIRECTORY/$ICON_APP_NAME/${ICON_CONFIG:2}"
   fi
-  local EXEC_PATH="$APPS_DIRECTORY/$APP_NAME/$EXECUTABLE_PATH"
-  echo "$ENV_STRING $EXECUTABLE_PRE_LAUNCH '$EXEC_PATH' $EXECUTABLE_ARGS"
+  echo "$ICON_CONFIG"
+}
+
+# Echos path of the app. Takes: app name($1).
+get_app_path () {
+  local PATH_APP_NAME PATH_CONFIG
+  PATH_APP_NAME="$1"
+  PATH_CONFIG=$(get_app_config "$PATH_APP_NAME" "Desktop" "" "Path")
+  if [[ -z $PATH_CONFIG ]]; then echo "$APPS_DIRECTORY/$PATH_APP_NAME"; fi
+  if [[ $PATH_CONFIG =~ ^\.\/ ]]; then
+    PATH_CONFIG="$APPS_DIRECTORY/$PATH_APP_NAME/${PATH_CONFIG:2}"
+  fi
+  echo "$PATH_CONFIG"
+  
 }
 
 # # Command functions
-# ## Checks for available updates and updates the app if possible
+# ## Checks for available updates to the binary and updates it if possible
 update_app () {
-  APP_NAME="$1"
+  local APP_DIR VERSION_FILE INSTALLED_VERSION RM_BEFORE_UPDATE ARCHIVE_STRIP UPDATE_SCRIPT EXTRACT_PATH
+  # Check if app's valid
   if ! check_valid_app "$APP_NAME"; then 
     echo "$APP_NAME | Not a valid app, can't update!"
-    exit 1
+    return 1
   fi
+  # Prepare variables
   APP_DIR="$APPS_DIRECTORY/$APP_NAME"
   VERSION_FILE="$APP_DIR/.version"
   INSTALLED_VERSION=$(awk 'NR==1{ print; exit }' "$VERSION_FILE") # Gets the 1st line of .version file
@@ -144,23 +186,20 @@ update_app () {
   UPDATE_SCRIPT="$APP_DIR/app-update.sh"
   # Get variables from a config file
   read_app_config "$APP_NAME"
-  if [[ "$DISABLE_UPDATES" = true ]]; then
-    echo "$APP_NAME | Updates are disabled in 'app.conf' for this app."
+  if [[ "$FORCE_OPTION" = false && "$DISABLE_UPDATES" = true ]]; then
+    echo "$APP_NAME | Updates are disabled in 'app.conf' for this app. Use -f to force the update."
     return 0
   fi
-  if [[ -z $EXECUTABLE_PATH ]]; then
-    echo "$APP_NAME | Configuration failure! 'General.Exec' is not set! Make sure to set it to a valid file name!"
-    return 1
+  if [[ -z $BIN_PATH ]]; then
+    send_error "Configuration failure! 'General.Exec' is not set! Make sure to set it to a valid file name!"
   fi
   # Check if newer version is available
   LATEST_VERSION="$("$UPDATE_SCRIPT" -v)"
   if [[ -z $LATEST_VERSION ]]; then # Handle empty error
-    echo "$APP_NAME | Failed to get the latest version of the app!"
-    return 1
+    send_error "Failed to get the latest version of the app!"
   fi
   if [[ $LATEST_VERSION =~ ^Fatal\ Error\!.*$ ]]; then # Handle errors
-    echo "$APP_NAME | $LATEST_VERSION"
-    return 1
+    send_error "$LATEST_VERSION"
   fi
   if [[ "$INSTALLED_VERSION" == "$LATEST_VERSION" ]]; then
     echo "$APP_NAME | Up To Date! Version: $LATEST_VERSION"
@@ -170,183 +209,282 @@ update_app () {
   echo "$APP_NAME | New version found! $LATEST_VERSION (Installed version: $INSTALLED_VERSION)"
   DOWNLOAD_URL="$("$UPDATE_SCRIPT" -u)"
   if [[ -z $DOWNLOAD_URL ]]; then # Handle empty error
-    echo "$APP_NAME | Failed to get the download URL for the app!"
-    return 1
+    send_error "Failed to get the download URL for the app!"
   fi
   if [[ $DOWNLOAD_URL =~ ^Fatal\ Error\!.*$ ]]; then # Handle errors
-    echo "$APP_NAME | $DOWNLOAD_URL"
-    return 1
+    send_error "$DOWNLOAD_URL"
   fi
 
   # Download the update and return if it fails
   echo "$APP_NAME | Downloading new version from '$DOWNLOAD_URL'."
   TEMP_FILE="$APP_DIR/temp-download-file"
-  BIN_PATH="$APP_DIR/$EXECUTABLE_PATH"
-  if ! wget --content-disposition -q --show-progress "$DOWNLOAD_URL" -O "$TEMP_FILE"; then
-    echo "$APP_NAME | Failed to download."
-    return 1
+  FULL_BIN_PATH="$APP_DIR/$BIN_PATH"
+  if ! wget --progress bar "$DOWNLOAD_URL" -O "$TEMP_FILE"; then
+    send_error "Failed to download."
   fi
 
   # Remove Before Update
   if [[ "$RM_BEFORE_UPDATE" = true ]]; then
     echo "$APP_NAME | Removing binary file(s) before updating."
-    rm -f "$APPS_DIRECTORY/$APP_NAME/$EXECUTABLE_PATH"
+    rm -f "$APP_DIR/$BIN_PATH"
     if [[ -n $EXTRACT_FOLDER ]]; then
-      REMOVE_PATH="$APPS_DIRECTORY/$APP_NAME/$EXTRACT_FOLDER"
+      REMOVE_PATH="$APP_DIR/$EXTRACT_FOLDER"
       remove_folder "$REMOVE_PATH"
     fi
   fi
 
   # Extract the downloaded file
-  if [[ "$EXECUTABLE_TYPE" == "SingleBin" ]]; then
-    echo "$APP_NAME | Saving the updated binary to '$BIN_PATH'."
-    mv -f "$TEMP_FILE" "$BIN_PATH"
-  elif [[ "$EXECUTABLE_TYPE" == "BinArchive" ]]; then
+  if [[ "$APP_TYPE" == "SingleBin" ]]; then
+    echo "$APP_NAME | Saving the update binary to '$FULL_BIN_PATH'."
+    mv -f "$TEMP_FILE" "$FULL_BIN_PATH"
+  elif [[ "$APP_TYPE" == "BinArchive" ]]; then
     EXTRACT_PATH="$APP_DIR"
     if [[ -n $EXTRACT_FOLDER ]]; then EXTRACT_PATH="$APP_DIR/$EXTRACT_FOLDER"; fi
     if [[ ! -d $EXTRACT_PATH ]]; then mkdir -p "$EXTRACT_PATH"; fi
-    echo "$APP_NAME | Extracting the updated archive to '$EXTRACT_PATH'."
+    echo "$APP_NAME | Extracting the update archive to '$EXTRACT_PATH'."
     tar -xf "$TEMP_FILE" -C "$EXTRACT_PATH" --strip "$ARCHIVE_STRIP" --overwrite
     rm -f "$TEMP_FILE"
   else
-    echo "$APP_NAME | Configuration failure! 'General.Type' is set to an unrecognised value - '$EXECUTABLE_TYPE' Allowed values: 'SingleBin','BinArchive'"
     rm -f "$TEMP_FILE"
-    return 1
+    send_error "Configuration failure! 'General.Type' is set to an unrecognised value - '$APP_TYPE' Allowed values: 'SingleBin','BinArchive'"
   fi
 
   # Finishing up
   echo "$APP_NAME | Setting executable permissions for the binary and saving the installed version."
-  chmod +x "$BIN_PATH"
+  chmod +x "$FULL_BIN_PATH"
   echo "$LATEST_VERSION" > "$VERSION_FILE"
+  if [[ -x "$APP_DIR/app-install.sh" ]]; then "$APP_DIR/app-install.sh"; fi # Run custom post-install script
   echo "$APP_NAME | Done updating!"
 }
 
-create_app_shortcut() {
-  APP_NAME="$1"
+app_desktop () {
+  local BASE_DESKTOP_FILE DESKTOP_FILE_DIR OUTPUT_DESKTOP_FILE LINE LAST_SECTION
+  # Check if the app's valid
   if ! check_valid_app "$APP_NAME"; then 
-    echo "$APP_NAME | Not a valid app, can't create shortcut!"
-    exit 1
+    send_error "Not a valid app, can't generate .desktop file!"
   fi
+  # Prepare variables
+  BASE_DESKTOP_FILE="$APPS_DIRECTORY/$APP_NAME/app.desktop"
   DESKTOP_FILE_DIR="$HOME/.local/share/applications/Portable"
-  APP_DESKTOP_FILE="$DESKTOP_FILE_DIR/$APP_NAME.desktop"
-  if [[ "$FORCE_OPTION" = false && -f "$APP_DESKTOP_FILE" ]]; then
-    echo "Desktop file '$APP_DESKTOP_FILE' already exists. Use -f to force creating the shortcut."
-    return 0
-  fi
-  # Get desktop entries
-  DESKTOP_EXEC=$(get_app_executable "$APP_NAME")
-  read_app_config "$APP_NAME"
-  if [[ $DESKTOP_ICON =~ ^\.\/ ]]; then
-    DESKTOP_ICON="$APPS_DIRECTORY/$APP_NAME/${DESKTOP_ICON:2}"
-  fi
-
-  echo "Creating desktop file '$APP_DESKTOP_FILE'."
-  echo "[Desktop Entry]" > "$APP_DESKTOP_FILE"
-  {
-    echo "Exec=$DESKTOP_EXEC";
-    echo "Path=$APPS_DIRECTORY/$APP_NAME/";
-    echo "Type=Application";
-    echo "Name=$DESKTOP_NAME";
-    echo "Icon=$DESKTOP_ICON";
-    echo "GenericName=$DESKTOP_GENERIC_NAME";
-    echo "Comment=$DESKTOP_COMMENT";
-    echo "MimeType=$DESKTOP_MIME_TYPE";
-    echo "Categories=$DESKTOP_CATEGORIES";
-    echo "Keywords=$DESKTOP_KEYWORDS";
-    echo "Terminal=$DESKTOP_TERMINAL";
-    echo "NoDisplay=$DESKTOP_NO_DISPLAY";
-  } >> "$APP_DESKTOP_FILE"
+  OUTPUT_DESKTOP_FILE="$DESKTOP_FILE_DIR/$APP_NAME.desktop"
+  LINE=""
+  LAST_SECTION=""
+  # Go through each line of the base desktop file
+  echo "" > "$OUTPUT_DESKTOP_FILE"
+  while IFS= read -r LINE; do
+    if ! process_config_line "$LINE"; then continue; fi
+    # Process sections
+    if [[ $LAST_SECTION != "$SECTION" ]]; then
+      LAST_SECTION="$SECTION"
+      if [[ $(wc -l "$OUTPUT_DESKTOP_FILE" | awk '{print $1}') -gt 1 ]]; then echo "" >> "$OUTPUT_DESKTOP_FILE"; fi
+      echo "[$SECTION]" >> "$OUTPUT_DESKTOP_FILE"
+      if [[ $SECTION == "Desktop Entry" ]]; then
+        {
+          echo "Type=Application"
+          echo "Exec=$(get_app_executable "$APP_NAME")"
+          echo "Icon=$(get_app_icon "$APP_NAME")"
+          echo "Path=$(get_app_path "$APP_NAME")"
+        } >> "$OUTPUT_DESKTOP_FILE"
+      elif [[ $SECTION =~ ^Desktop\ Action\ .*$ ]]; then
+        {
+          echo "Exec=$(get_app_executable "$APP_NAME" "$SECTION")"
+          echo "Icon=$(get_app_icon "$APP_NAME" "$SECTION")"
+        } >> "$OUTPUT_DESKTOP_FILE"
+      fi
+    fi
+    # Process entries
+    if [[ $SECTION == "Desktop Entry" ]]; then
+      if [[ $KEY == "Icon" || $KEY == "Exec" || $KEY == "Type" || $KEY == "Path" ]]; then continue; fi # Skip generated keys
+    elif [[ $SECTION =~ ^Desktop\ Action\ .*$ ]]; then
+      if [[ $KEY == "Exec" ]];then continue; fi
+    fi
+    echo "$KEY=$VALUE" >> "$OUTPUT_DESKTOP_FILE"
+  done < <(grep "" "$BASE_DESKTOP_FILE")
 }
 
-update_all_apps () {
+# Refreshes the meta files of the app, syncing them with the repo's database.
+refresh_app() {
+  local APP_ID APP_DIR APP_DB_URL CONTENTS_DATA
+  # Check if the app's valid
+  if ! check_valid_app "$APP_NAME"; then 
+    send_error "Not a valid app, can't refresh meta files!"
+  fi
+  # Prepare variables
+  APP_ID=$(get_app_config "$APP_NAME" "General" "" "AppId") 
+  APP_DIR="$APPS_DIRECTORY/$APP_NAME"
+  APP_DB_URL="$DATABASE_API_URL/$APP_ID"
+  # Get info about contents of the database
+  CONTENTS_DATA=$(wget -qO- "$APP_DB_URL")
+  if [[ -z $CONTENTS_DATA ]]; then
+    send_error "Failed to download information about database contents from URL '$APP_DB_URL'!"
+  fi
+  # Download files based on the contents of the database
+  echo "Downloading meta files from the repo's database."
+  for FILE_DATA in $(echo "$CONTENTS_DATA" | jq -cr '.[]'); do
+    FILE_NAME=$(echo "$FILE_DATA" | jq -r '.name')
+    DOWNLOAD_URL=$(echo "$FILE_DATA" | jq -r '.download_url')
+    echo "$FILE_NAME - $DOWNLOAD_URL"
+    wget --progress bar "$DOWNLOAD_URL" -O "$APP_DIR/$FILE_NAME"
+    if [[ $FILE_NAME =~ \.sh^ ]]; then chmod +x "$APP_DIR/$FILE_NAME"; fi # Make scripts executable
+  done
+  echo "Done! Meta files are now synced up with the latest in the repo's database."
+}
+
+refresh_all_apps () {
+  local APP_PATH APP_BASENAME SUB_APP_PATH SUB_APP_NAME
   for APP_PATH in "$APPS_DIRECTORY"/*/; do
     if [ ! -d "$APP_PATH" ]; then continue; fi # Skip files
-    APP_NAME="$(basename "$APP_PATH")"
+    APP_BASENAME="$(basename "$APP_PATH")"
+    APP_NAME=$APP_BASENAME
     if check_valid_app "$APP_NAME"; then
-        update_app "$APP_NAME"
+      echo "Running refresh for app '$APP_NAME'."
+      refresh_app
     else
       for SUB_APP_PATH in "$APP_PATH"/*/; do
         if [ ! -d "$SUB_APP_PATH" ]; then continue; fi # Skip files
         SUB_APP_NAME="$APP_NAME/$(basename "$SUB_APP_PATH")"
-        if check_valid_app "$SUB_APP_NAME"; then
-          update_app "$SUB_APP_NAME"
+        APP_NAME=$SUB_APP_NAME
+        if check_valid_app "$APP_NAME"; then
+          echo "Running refresh for app '$APP_NAME'."
+          refresh_app
         fi
       done
-      continue
     fi
   done
 }
 
-create_all_app_shortcuts () {
-    for APP_PATH in "$APPS_DIRECTORY"/*/; do
+update_all_apps () {
+  local APP_PATH APP_BASENAME SUB_APP_PATH SUB_APP_NAME
+  for APP_PATH in "$APPS_DIRECTORY"/*/; do
     if [ ! -d "$APP_PATH" ]; then continue; fi # Skip files
-    APP_NAME="$(basename "$APP_PATH")"
+    APP_BASENAME="$(basename "$APP_PATH")"
+    APP_NAME=$APP_BASENAME
     if check_valid_app "$APP_NAME"; then
-        create_app_shortcut "$APP_NAME"
+      echo "Running update for app '$APP_NAME'."
+      update_app
     else
       for SUB_APP_PATH in "$APP_PATH"/*/; do
         if [ ! -d "$SUB_APP_PATH" ]; then continue; fi # Skip files
         SUB_APP_NAME="$APP_NAME/$(basename "$SUB_APP_PATH")"
-        if check_valid_app "$SUB_APP_NAME"; then
-          create_app_shortcut "$SUB_APP_NAME"
+        APP_NAME=$SUB_APP_NAME
+        if check_valid_app "$APP_NAME"; then
+          echo "Running update for app '$APP_NAME'."
+          update_app
         fi
       done
-      continue
+    fi
+  done
+}
+
+all_app_desktop () {
+  local APP_PATH APP_BASENAME SUB_APP_PATH SUB_APP_NAME
+  for APP_PATH in "$APPS_DIRECTORY"/*/; do
+    if [ ! -d "$APP_PATH" ]; then continue; fi # Skip files
+    APP_BASENAME="$(basename "$APP_PATH")"
+    APP_NAME=$APP_BASENAME
+    if check_valid_app "$APP_NAME"; then
+      echo "Generating .desktop file for app '$APP_NAME'."
+      app_desktop 
+    else
+      for SUB_APP_PATH in "$APP_PATH"/*/; do
+        if [ ! -d "$SUB_APP_PATH" ]; then continue; fi # Skip files
+        SUB_APP_NAME="$APP_BASENAME/$(basename "$SUB_APP_PATH")"
+        APP_NAME=$SUB_APP_NAME
+        if check_valid_app "$APP_NAME"; then
+          echo "Generating .desktop file for app '$APP_NAME'."
+          app_desktop 
+        fi
+      done
     fi
   done
 }
 
 add_app () {
-  local NEW_APP_NAME="$1"
-  if check_valid_app "$NEW_APP_NAME"; then
-    echo "App '$NEW_APP_NAME' can't be added, because it already exists!"
-    exit 1
+  local NEW_APP_DIR INPUT_APP_ID APP_DB_URL ALIASES_URL FINAL_APP_ID CONTENTS_DATA
+  # Check for invalid subdirectory
+  if [[ $(echo "$APP_NAME" | grep -o "/" | wc -l) -gt 1 ]]; then
+    echo "App '$APP_NAME' subdirectory is too deep! Don't use more than a single '/'." && exit 1
   fi
-
-  local NEW_APP_DIR="$APPS_DIRECTORY/$NEW_APP_NAME"
-  DEFAULT_FILES_DIR="$(dirname "$(realpath "$0")")/default"
-  NEW_APP_BASENAME="$(basename "$NEW_APP_DIR" | tr '[:upper:]' '[:lower:]' | tr ' _' '-')" # Gets name of the deepest directory and formats it to check in the database
-  APP_DB_URL="$DATABASE_URL/$NEW_APP_BASENAME"
-  
+  # Check for exisiting directories
+  NEW_APP_DIR="$APPS_DIRECTORY/$APP_NAME"
+  if [[ -d $NEW_APP_DIR ]]; then
+    echo "App '$APP_NAME' can't be added, because '$NEW_APP_DIR' already exists!" && exit 1
+  fi
+  # Prepare variables
+  INPUT_APP_ID="$(basename "$NEW_APP_DIR" | tr '[:upper:]' '[:lower:]' | tr ' _' '-')" # Gets name of the deepest directory and formats it to check in the database
+  APP_DB_URL="$DATABASE_API_URL/$INPUT_APP_ID"
+  ALIASES_URL="$DATABASE_API_URL/aliases.conf"
+  FINAL_APP_ID=""
+  # Create the directory
   echo "Creating new app in '$NEW_APP_DIR'."
   mkdir -p "$NEW_APP_DIR"
-  if wget --spider -q "$APP_DB_URL/app.conf"; then # Files for apps in the database
-    echo "Name '$NEW_APP_BASENAME' found in the database. Using pre-filled files."
-    wget --content-disposition -q --show-progress "$APP_DB_URL/app.conf" -O "$NEW_APP_DIR/app.conf"
-    wget --content-disposition -q --show-progress "$APP_DB_URL/app-update.sh" -O "$NEW_APP_DIR/app-update.sh"
-    # Try to download any possible icons
-    if wget --spider -q "$APP_DB_URL/icon.svg"; then
-      wget --content-disposition -q --show-progress "$APP_DB_URL/icon.svg" -O "$NEW_APP_DIR/icon.svg"
-    elif wget --spider -q "$APP_DB_URL/icon.png"; then
-      wget --content-disposition -q --show-progress "$APP_DB_URL/icon.png" -O "$NEW_APP_DIR/icon.png"
-    elif wget --spider -q "$APP_DB_URL/icon.ico"; then
-      wget --content-disposition -q --show-progress "$APP_DB_URL/icon.ico" -O "$NEW_APP_DIR/icon.ico"
+  # Resolve the final app id, possibly with aliases.
+  if wget --spider -q "$APP_DB_URL"; then
+    echo "Name '$INPUT_APP_ID' found in the database. Using its meta files from repo's database."
+    FINAL_APP_ID="$INPUT_APP_ID"
+  else
+    echo "Name '$INPUT_APP_ID' not found in the database."
+    ALIASES_DATA=$(wget -qO- "$ALIASES_URL")
+    for LINE in $ALIASES_DATA; do 
+      if [[ $LINE =~ (=|,)$INPUT_APP_ID($|,| ) ]]; then # Finds a line where app is found
+        FINAL_APP_ID=$(echo "$LINE" | awk -F'=' '{ print $1 }') # Gets the id of the app (before =)
+      fi
+    done
+    if [[ -n $FINAL_APP_ID ]]; then
+      echo "Name '$INPUT_APP_ID' found as alias for '$FINAL_APP_ID'."
+    else 
+      echo "Name '$INPUT_APP_ID' not found as alias for any app, using default template."
+      FINAL_APP_ID="default"
     fi
-  else # Default empty files
-    echo "Creating default template app."
-    cp "$DEFAULT_FILES_DIR/app.conf" "$NEW_APP_DIR/app.conf"
-    cp "$DEFAULT_FILES_DIR/app-update.sh" "$NEW_APP_DIR/app-update.sh"
   fi
-  chmod +x "$NEW_APP_DIR/app-update.sh"
-  return
+  APP_DB_URL="$DATABASE_API_URL/$FINAL_APP_ID"
+  # Get info about contents of the database
+  CONTENTS_DATA=$(wget -qO- "$APP_DB_URL")
+  if [[ -z $CONTENTS_DATA ]]; then
+    send_error "Failed to download information about database contents from URL '$APP_DB_URL'!"
+  fi
+  # Download files based on the contents of the database
+  echo "Downloading meta files from the repo's database."
+  for FILE_DATA in $(echo "$CONTENTS_DATA" | jq -cr '.[]'); do
+    FILE_NAME=$(echo "$FILE_DATA" | jq -r '.name')
+    DOWNLOAD_URL=$(echo "$FILE_DATA" | jq -r '.download_url')
+    echo "$FILE_NAME - $DOWNLOAD_URL"
+    wget --progress bar "$DOWNLOAD_URL" -O "$NEW_APP_DIR/$FILE_NAME"
+    if [[ $FILE_NAME =~ \.sh^ ]]; then chmod +x "$NEW_APP_DIR/$FILE_NAME"; fi # Make scripts executable
+  done
+  # Finish!
+  echo "Done! You can install the app with options: -c update -a '$APP_NAME'"
+  if [[ "$FINAL_APP_ID" == "default" ]]; then
+    echo "With the default template, make sure to update the 'app.conf', 'app-update.sh' and 'app.desktop' files first."
+  fi
 }
 
-# Verifies basic properties of the required files to check if they are valid and corrects them if they aren't
-verify_app () {
-  return
+# Removes the app
+remove_app () {
+  # User confirm
+  read -pr "$APP_NAME | Are you sure you want to remove this app? [y/N]: " CHOICE
+  if [[ $CHOICE == "Y" || $CHOICE == "y" ]]; then
+    echo "Removing..."
+  elif [[ $CHOICE == "N" || $CHOICE == "n" || $CHOICE == "" ]]; then
+    echo "Cancelled." && exit 0
+  else
+    echo "Invalid choice! Cancelled." && exit 1
+  fi
+  # Remove the app
+
+  if [[ -x "$APP_DIR/app-remove.sh" ]]; then "$APP_DIR/app-remove.sh"; fi # Run custom post-remove script
+  rm -f "$APP_DIR/app-remove.sh"
 }
 
 # Forces reinstallation of the app
 reinstall_app () {
-  APP_NAME=$1
   if ! check_valid_app "$APP_NAME"; then 
-    echo "$APP_NAME | Not a valid app, can't reinstall!"
-    exit 1
+    send_error "Not a valid app, can't reinstall!"
   fi
   read_app_config "$APP_NAME"
   echo "$APP_NAME | This process will remove the '.version' file and the app's binary file(s) and trigger update for the app to force its installation."
   rm -f "$APPS_DIRECTORY/$APP_NAME/.version"
-  rm -f "$APPS_DIRECTORY/$APP_NAME/$EXECUTABLE_PATH"
+  rm -f "$APPS_DIRECTORY/$APP_NAME/$BIN_PATH"
   if [[ -n $EXTRACT_FOLDER ]]; then
     REMOVE_PATH="$APPS_DIRECTORY/$APP_NAME/$EXTRACT_FOLDER"
     remove_folder "$REMOVE_PATH"
@@ -355,7 +493,6 @@ reinstall_app () {
 }
 
 run_app () {
-  APP_NAME=$1
   APP_EXEC=$(get_app_executable "$APP_NAME")
   echo "Running:"
   echo "$APP_EXEC"
@@ -364,21 +501,29 @@ run_app () {
 
 # # Selecting the command
 if [[ $COMMAND = "run" ]]; then
-  run_app "$APP_NAME"
+  run_app
 elif [[ "$COMMAND" = "update" ]]; then
   if [[ -z $APP_NAME ]]; then
     update_all_apps
   else
-    update_app "$APP_NAME"
+    update_app
+  fi
+elif [[ "$COMMAND" = "refresh" ]]; then
+  if [[ -z $APP_NAME ]]; then
+    refresh_all_apps
+  else
+    refresh_app
   fi
 elif [[ "$COMMAND" = "add" ]]; then
-  add_app "$APP_NAME"
+  add_app
 elif [[ "$COMMAND" = "reinstall" ]]; then
-  reinstall_app "$APP_NAME"
+  reinstall_app
+elif [[ "$COMMAND" = "remove" ]]; then
+  remove_app
 elif [[ "$COMMAND" = "shortcut" ]]; then
   if [[ -z $APP_NAME ]]; then
-    create_all_app_shortcuts
+    all_app_desktop
   else
-    create_app_shortcut "$APP_NAME"
+    app_desktop
   fi
 fi
