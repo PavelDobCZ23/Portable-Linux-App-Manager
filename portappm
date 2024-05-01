@@ -483,7 +483,7 @@ reinstall_app () {
   fi
   read_app_config "$APP_NAME"
   echo "$APP_NAME | This process will remove the '.version' file and the app's binary file(s) and trigger update for the app to force its installation."
-  rm -f "$APPS_DIRECTORY/$APP_NAME/.version"
+  echo "" > "$APPS_DIRECTORY/$APP_NAME/.version"
   rm -f "$APPS_DIRECTORY/$APP_NAME/$BIN_PATH"
   if [[ -n $EXTRACT_FOLDER ]]; then
     REMOVE_PATH="$APPS_DIRECTORY/$APP_NAME/$EXTRACT_FOLDER"
