@@ -171,7 +171,7 @@ get_app_path () {
 # # Command functions
 # ## Checks for available updates to the binary and updates it if possible
 update_app () {
-  local APP_DIR VERSION_FILE INSTALLED_VERSION RM_BEFORE_UPDATE ARCHIVE_STRIP UPDATE_SCRIPT EXTRACT_PATH
+  local APP_DIR VERSION_FILE INSTALLED_VERSION UPDATE_SCRIPT EXTRACT_PATH
   # Check if app's valid
   if ! check_valid_app "$APP_NAME"; then 
     echo "$APP_NAME | Not a valid app, can't update!"
@@ -241,8 +241,8 @@ update_app () {
     EXTRACT_PATH="$APP_DIR"
     if [[ -n $EXTRACT_FOLDER ]]; then EXTRACT_PATH="$APP_DIR/$EXTRACT_FOLDER"; fi
     if [[ ! -d $EXTRACT_PATH ]]; then mkdir -p "$EXTRACT_PATH"; fi
-    echo "$APP_NAME | Extracting the update archive to '$EXTRACT_PATH'."
-    tar -xf "$TEMP_FILE" -C "$EXTRACT_PATH" --strip "$ARCHIVE_STRIP" --overwrite
+    echo "$APP_NAME | Extracting the update archive to '$EXTRACT_PATH'. $ARCHIVE_STRIP"
+    tar -xf "$TEMP_FILE" -C "$EXTRACT_PATH" --strip-components=$ARCHIVE_STRIP --overwrite
     rm -f "$TEMP_FILE"
   else
     rm -f "$TEMP_FILE"
@@ -325,9 +325,7 @@ refresh_app() {
     DOWNLOAD_URL=$(echo "$FILE_DATA" | jq -r '.download_url')
     echo "$FILE_NAME - $DOWNLOAD_URL"
     wget --progress bar "$DOWNLOAD_URL" -O "$APP_DIR/$FILE_NAME"
-    if [[ $FILE_NAME =~ \.sh$ ]]; then 
-      chmod +x "$APP_DIR/$FILE_NAME"
-    fi
+    if [[ $FILE_NAME =~ \.sh$ ]]; then chmod +x "$APP_DIR/$FILE_NAME"; fi
   done
   echo "Done! Meta files are now synced up with the latest in the repo's database."
 }
@@ -452,10 +450,7 @@ add_app () {
     DOWNLOAD_URL=$(echo "$FILE_DATA" | jq -r '.download_url')
     echo "$FILE_NAME - $DOWNLOAD_URL"
     wget --progress bar "$DOWNLOAD_URL" -O "$NEW_APP_DIR/$FILE_NAME"
-    if [[ $FILE_NAME =~ \.sh$ ]]; then
-      echo "Setting file '$APP_DIR/$FILE_NAME' as executable."
-      chmod +x "$APP_DIR/$FILE_NAME"
-    fi
+    if [[ $FILE_NAME =~ \.sh$ ]]; then chmod +x "$NEW_APP_DIR/$FILE_NAME"; fi
   done
   # Finish!
   echo "Done! You can install the app with options: -c update -a '$APP_NAME'"
