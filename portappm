@@ -185,7 +185,7 @@ update_app () {
   UPDATE_SCRIPT="$APP_DIR/app-update.sh"
   # Get variables from a config file
   read_app_config "$APP_NAME"
-  ARCHIVE_STRIP=$(get_app_config  "$APP_NAME" "General" "" "StripArchive")
+  ARCHIVE_STRIP=$(get_app_config "$APP_NAME" "General" "" "StripArchive")
   if [[ -z $ARCHIVE_STRIP ]]; then ARCHIVE_STRIP=0; fi
   if [[ "$FORCE_OPTION" = false && "$DISABLE_UPDATES" = true ]]; then
     echo "$APP_NAME | Updates are disabled in 'app.conf' for this app. Use -f to force the update."
