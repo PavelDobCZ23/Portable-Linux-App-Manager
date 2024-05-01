@@ -325,9 +325,9 @@ refresh_app() {
     DOWNLOAD_URL=$(echo "$FILE_DATA" | jq -r '.download_url')
     echo "$FILE_NAME - $DOWNLOAD_URL"
     wget --progress bar "$DOWNLOAD_URL" -O "$APP_DIR/$FILE_NAME"
-    if [[ $FILE_NAME =~ sh^ ]]; then 
+    if [[ $FILE_NAME =~ sh$ ]]; then 
       chmod +x "$APP_DIR/$FILE_NAME"
-    fi # Make scripts executable
+    fi
   done
   echo "Done! Meta files are now synced up with the latest in the repo's database."
 }
@@ -452,10 +452,10 @@ add_app () {
     DOWNLOAD_URL=$(echo "$FILE_DATA" | jq -r '.download_url')
     echo "$FILE_NAME - $DOWNLOAD_URL"
     wget --progress bar "$DOWNLOAD_URL" -O "$NEW_APP_DIR/$FILE_NAME"
-    if [[ $FILE_NAME =~ \.sh^ ]]; then
+    if [[ $FILE_NAME =~ \.sh$ ]]; then
       echo "Setting file '$APP_DIR/$FILE_NAME' as executable."
       chmod +x "$APP_DIR/$FILE_NAME"
-    fi # Make scripts executable # Make scripts executable
+    fi
   done
   # Finish!
   echo "Done! You can install the app with options: -c update -a '$APP_NAME'"
