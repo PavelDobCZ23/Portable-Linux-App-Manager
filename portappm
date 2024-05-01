@@ -108,12 +108,7 @@ read_app_config () {
     # Save values in config into variables
     if [[ $SECTION == "General" && -z $SUBSECTION ]]; then
       if [[ $KEY == "Bin" ]];then BIN_PATH=$VALUE;fi
-      if [[ $KEY == "Type" ]];then APP_TYPE=$VALUE;fi
       if [[ $KEY == "ExtractFolder" ]];then EXTRACT_FOLDER=$VALUE;fi
-      if [[ $KEY == "StripArchive" ]];then ARCHIVE_STRIP=$VALUE;fi
-      if [[ $KEY == "RemoveBeforeUpdate" ]];then RM_BEFORE_UPDATE=$VALUE;fi
-      if [[ $KEY == "DisableUpdates" ]];then DISABLE_UPDATES=$VALUE;fi
-      if [[ $KEY == "ForceVersion" ]];then FORCE_VERSION=$VALUE;fi
     fi
   done < <(grep "" "$CONFIG_FILE")
 }
@@ -181,12 +176,19 @@ update_app () {
   APP_DIR="$APPS_DIRECTORY/$APP_NAME"
   VERSION_FILE="$APP_DIR/.version"
   INSTALLED_VERSION=$(awk 'NR==1{ print; exit }' "$VERSION_FILE") # Gets the 1st line of .version file
-  RM_BEFORE_UPDATE=false
   UPDATE_SCRIPT="$APP_DIR/app-update.sh"
   # Get variables from a config file
   read_app_config "$APP_NAME"
+
   ARCHIVE_STRIP=$(get_app_config "$APP_NAME" "General" "" "StripArchive")
   if [[ -z $ARCHIVE_STRIP ]]; then ARCHIVE_STRIP=0; fi
+  DISABLE_UPDATES=$(get_app_config "$APP_NAME" "General" "" "DisableUpdates")
+  if [[ -z $DISABLE_UPDATES ]]; then DISABLE_UPDATES=false; fi
+  RM_BEFORE_UPDATE=$(get_app_config "$APP_NAME" "General" "" "RemoveBeforeUpdate")
+  if [[ -z $RM_BEFORE_UPDATE ]]; then RM_BEFORE_UPDATE=false; fi
+  FORCED_VERSION=$(get_app_config "$APP_NAME" "General" "" "ForceVersion")
+  APP_TYPE=$(get_app_config "$APP_NAME" "General" "" "Type")
+
   if [[ "$FORCE_OPTION" = false && "$DISABLE_UPDATES" = true ]]; then
     echo "$APP_NAME | Updates are disabled in 'app.conf' for this app. Use -f to force the update."
     return 0
@@ -196,23 +198,20 @@ update_app () {
   fi
   # Check if newer version is available
   LATEST_VERSION="$("$UPDATE_SCRIPT" -v)"
-  if [[ -z $LATEST_VERSION ]]; then # Handle empty error
+  if [[ -z $LATEST_VERSION ]]; then
     send_error "Failed to get the latest version of the app!"
-  fi
-  if [[ $LATEST_VERSION =~ ^Fatal\ Error\!.*$ ]]; then # Handle errors
+  elif [[ $LATEST_VERSION =~ ^Fatal\ Error\!.*$ ]]; then
     send_error "$LATEST_VERSION"
-  fi
-  if [[ "$INSTALLED_VERSION" == "$LATEST_VERSION" ]]; then
+  elif [[ "$INSTALLED_VERSION" == "$LATEST_VERSION" ]]; then
     echo "$APP_NAME | Up To Date! Version: $LATEST_VERSION"
     return 0
   fi
   # Continue if an update is available
   echo "$APP_NAME | New version found! $LATEST_VERSION (Installed version: $INSTALLED_VERSION)"
   DOWNLOAD_URL="$("$UPDATE_SCRIPT" -u)"
-  if [[ -z $DOWNLOAD_URL ]]; then # Handle empty error
+  if [[ -z $DOWNLOAD_URL ]]; then
     send_error "Failed to get the download URL for the app!"
-  fi
-  if [[ $DOWNLOAD_URL =~ ^Fatal\ Error\!.*$ ]]; then # Handle errors
+  elif [[ $DOWNLOAD_URL =~ ^Fatal\ Error\!.*$ ]]; then
     send_error "$DOWNLOAD_URL"
   fi
 
@@ -236,13 +235,13 @@ update_app () {
 
   # Extract the downloaded file
   if [[ "$APP_TYPE" == "SingleBin" ]]; then
-    echo "$APP_NAME | Saving the update binary to '$FULL_BIN_PATH'."
+    send_info "Saving the update binary to '$FULL_BIN_PATH'."
     mv -f "$TEMP_FILE" "$FULL_BIN_PATH"
   elif [[ "$APP_TYPE" == "BinArchive" ]]; then
     EXTRACT_PATH="$APP_DIR"
     if [[ -n $EXTRACT_FOLDER ]]; then EXTRACT_PATH="$APP_DIR/$EXTRACT_FOLDER"; fi
     if [[ ! -d $EXTRACT_PATH ]]; then mkdir -p "$EXTRACT_PATH"; fi
-    echo "$APP_NAME | Extracting the update archive to '$EXTRACT_PATH'."
+    send_info "Extracting the update archive to '$EXTRACT_PATH'."
     tar -xf "$TEMP_FILE" -C "$EXTRACT_PATH" --strip-components="$ARCHIVE_STRIP" --overwrite
     rm -f "$TEMP_FILE"
   else
@@ -251,15 +250,15 @@ update_app () {
   fi
 
   # Finishing up
-  echo "$APP_NAME | Setting executable permissions for the binary and saving the installed version."
+  send_info "Setting executable permissions for the binary and saving the installed version."
   chmod +x "$FULL_BIN_PATH"
   echo "$LATEST_VERSION" > "$VERSION_FILE"
   if [[ -x "$APP_DIR/app-install.sh" ]]; then "$APP_DIR/app-install.sh"; fi # Run custom post-install script
-  echo "$APP_NAME | Done updating!"
+  send_info "Done updating!"
 }
 
 app_desktop () {
-  local BASE_DESKTOP_FILE DESKTOP_FILE_DIR OUTPUT_DESKTOP_FILE LINE LAST_SECTION
+  local BASE_DESKTOP_FILE DESKTOP_FILE_DIR FILE_NAME OUTPUT_DESKTOP_FILE LINE LAST_SECTION
   # Check if the app's valid
   if ! check_valid_app "$APP_NAME"; then 
     send_error "Not a valid app, can't generate .desktop file!"
@@ -267,11 +266,17 @@ app_desktop () {
   # Prepare variables
   BASE_DESKTOP_FILE="$APPS_DIRECTORY/$APP_NAME/app.desktop"
   DESKTOP_FILE_DIR="$HOME/.local/share/applications/Portable"
-  OUTPUT_DESKTOP_FILE="$DESKTOP_FILE_DIR/$APP_NAME.desktop"
+  CUSTOM_FILE_NAME=$(get_app_config "$APP_NAME" "Desktop" "" "FileName")
+  if [[ -z $CUSTOM_FILE_NAME ]]; 
+  then FILE_NAME="$APP_NAME.desktop"
+  else FILE_NAME="$CUSTOM_FILE_NAME"
+  fi
+  OUTPUT_DESKTOP_FILE="$DESKTOP_FILE_DIR/$FILE_NAME"
   LINE=""
   LAST_SECTION=""
+
   # Go through each line of the base desktop file
-  echo "" > "$OUTPUT_DESKTOP_FILE"
+  echo -n > "$OUTPUT_DESKTOP_FILE"
   while IFS= read -r LINE; do
     if ! process_config_line "$LINE"; then continue; fi
     # Process sections
@@ -301,6 +306,8 @@ app_desktop () {
     fi
     echo "$KEY=$VALUE" >> "$OUTPUT_DESKTOP_FILE"
   done < <(grep "" "$BASE_DESKTOP_FILE")
+
+  send_info "Done! App shortcut was saved at '$OUTPUT_DESKTOP_FILE'."
 }
 
 # Refreshes the meta files of the app, syncing them with the repo's database.
