@@ -20,7 +20,7 @@ get_url () {
 	fi
 }
 
-while getopts "uv" OPT; do
+while getopts "u:v" OPT; do
 	case "${OPT}" in
 		v)
 			get_version

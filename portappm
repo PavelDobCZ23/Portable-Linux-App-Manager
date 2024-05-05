@@ -208,7 +208,7 @@ update_app () {
   fi
   # Continue if an update is available
   echo "$APP_NAME | New version found! $LATEST_VERSION (Installed version: $INSTALLED_VERSION)"
-  DOWNLOAD_URL="$("$UPDATE_SCRIPT" -u)"
+  DOWNLOAD_URL="$("$UPDATE_SCRIPT" -u "")"
   if [[ -z $DOWNLOAD_URL ]]; then
     send_error "Failed to get the download URL for the app!"
   elif [[ $DOWNLOAD_URL =~ ^Fatal\ Error\!.*$ ]]; then

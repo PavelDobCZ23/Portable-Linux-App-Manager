@@ -14,20 +14,19 @@ get_version () {
 }
 
 # This is the function that returns a URL leading to a downloadable file.
-# It accepts a single argument specifying which version to download, empty gets the latest.
+# It may accept a single argument specifying which version to download.
 get_url () {
   SET_VERSION="$1"
   echo ""
 }
 
-# This defines arguments -u and -v. Argument -u must be given some string!
-while getopts "u:v" OPT; do
+while getopts "uv" OPT; do
   case "${OPT}" in
-    u)
-      get_url "${OPTARG}"
-      ;;
     v)
-      get_version
+      get_version && exit 0
+      ;;
+    u)
+      get_url "${OPTARG}" && exit 0
       ;;
     *)
   esac
