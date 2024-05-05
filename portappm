@@ -129,7 +129,7 @@ get_app_executable () {
   local EXEC_APP_NAME SUBSECTION BIN_PATH EXEC_ARGS EXEC_ENV EXEC_PRE_LAUNCH ENV_STRING EXEC_PATH
   EXEC_APP_NAME="$1"
   SUBSECTION="$2"
-  BIN_PATH=$(get_app_config "$EXEC_APP_NAME" "General" "" "Exec")
+  BIN_PATH=$(get_app_config "$EXEC_APP_NAME" "General" "" "Bin")
   EXEC_ARGS=$(get_app_config "$EXEC_APP_NAME" "Desktop" "$SUBSECTION" "Arguments")
   EXEC_ENV=$(get_app_config "$EXEC_APP_NAME" "Desktop" "$SUBSECTION" "EnvVariables")
   EXEC_PRE_LAUNCH=$(get_app_config "$EXEC_APP_NAME" "Desktop" "$SUBSECTION" "PreLaunch")
