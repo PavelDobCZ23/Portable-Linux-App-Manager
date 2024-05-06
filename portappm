@@ -166,7 +166,7 @@ get_app_path () {
 # # Command functions
 # ## Checks for available updates to the binary and updates it if possible
 update_app () {
-  local APP_DIR VERSION_FILE INSTALLED_VERSION UPDATE_SCRIPT EXTRACT_PATH
+  local APP_DIR VERSION_FILE INSTALLED_VERSION UPDATE_SCRIPT EXTRACT_PATH FORCED_VERSION LATEST_VERSION
   # Check if app's valid
   if ! check_valid_app "$APP_NAME"; then 
     echo "$APP_NAME | Not a valid app, can't update!"
@@ -190,25 +190,32 @@ update_app () {
   APP_TYPE=$(get_app_config "$APP_NAME" "General" "" "Type")
 
   if [[ "$FORCE_OPTION" = false && "$DISABLE_UPDATES" = true ]]; then
-    echo "$APP_NAME | Updates are disabled in 'app.conf' for this app. Use -f to force the update."
+    send_info "Updates are disabled in 'app.conf' for this app. Use -f to force the update."
     return 0
   fi
   if [[ -z $BIN_PATH ]]; then
     send_error "Configuration failure! 'General.Exec' is not set! Make sure to set it to a valid file name!"
   fi
+  # Handle forcing version
+  if [[ -n $FORCED_VERSION ]]; then
+    LATEST_VERSION="$FORCED_VERSION"
+    send_info "Forced version is configured in 'app.conf' file - '$FORCED_VERSION'. This is experimental!"
+    send_info "The 'app-update.sh' script has to be designed for this to work. Make sure the version exists."
+  else
+    LATEST_VERSION="$("$UPDATE_SCRIPT" -v)"
+  fi
   # Check if newer version is available
-  LATEST_VERSION="$("$UPDATE_SCRIPT" -v)"
   if [[ -z $LATEST_VERSION ]]; then
     send_error "Failed to get the latest version of the app!"
   elif [[ $LATEST_VERSION =~ ^Fatal\ Error\!.*$ ]]; then
     send_error "$LATEST_VERSION"
   elif [[ "$INSTALLED_VERSION" == "$LATEST_VERSION" ]]; then
-    echo "$APP_NAME | Up To Date! Version: $LATEST_VERSION"
+    send_info "Up To Date! Version: $LATEST_VERSION"
     return 0
   fi
   # Continue if an update is available
   echo "$APP_NAME | New version found! $LATEST_VERSION (Installed version: $INSTALLED_VERSION)"
-  DOWNLOAD_URL="$("$UPDATE_SCRIPT" -u "")"
+  DOWNLOAD_URL="$("$UPDATE_SCRIPT" -u "$FORCED_VERSION")"
   if [[ -z $DOWNLOAD_URL ]]; then
     send_error "Failed to get the download URL for the app!"
   elif [[ $DOWNLOAD_URL =~ ^Fatal\ Error\!.*$ ]]; then
@@ -322,6 +329,9 @@ refresh_app() {
   APP_DIR="$APPS_DIRECTORY/$APP_NAME"
   APP_DB_URL="$DATABASE_API_URL/$APP_ID"
   # Get info about contents of the database
+  if [[ -z $APP_ID ]]; then
+    send_error "Empty General.AppId in 'app.conf' means the app is custom and not from the repo's database!"
+  fi
   CONTENTS_DATA=$(wget -qO- "$APP_DB_URL")
   if [[ -z $CONTENTS_DATA ]]; then
     send_error "Failed to download information about database contents from URL '$APP_DB_URL'!"

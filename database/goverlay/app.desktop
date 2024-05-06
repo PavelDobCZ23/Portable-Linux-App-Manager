@@ -1,3 +1,6 @@
 [Desktop Entry]
 Name = GOverlay
 Comment = Graphical UI to help manage OpenGL / Vulkan overlays
+Terminal=false
+Categories=Game;
+Keywords=MangoHud;vkBasalt;msi;afterburner;
