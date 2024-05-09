@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name = Blockbench
+Comment = Low-poly modeling and animation software
+Terminal = false
+Categories=3DGraphics;
+StartupWMClass=Blockbench

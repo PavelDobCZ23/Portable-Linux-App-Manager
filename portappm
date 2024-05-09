@@ -10,6 +10,8 @@ COMMAND=""
 APP_NAME=""
 #* true when -f arg is used
 FORCE_OPTION=false
+#* List of meta files (excludes other files like icon.* or readme.*)
+META_FILES=("app.conf" "app-update.sh" "app.desktop" "install.sh" "remove.sh")
 
 # Get cli flags
 while getopts "fc:a:d:" OPT; do
