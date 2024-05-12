@@ -1,5 +1,11 @@
 #!/bin/bash
 #* portappm *#
+#* location of XDG complient directories for various assets
+if [[ -z $XDG_DATA_HOME ]]; then DATA_DIR="$HOME/.local/share/"
+else DATA_DIR=$XDG_DATA_HOME
+fi
+DESKTOP_FILES_DIR="$DATA_DIR/applications"
+ICON_FILES_DIR="$DATA_DIR/icons/hicolor"
 #* url of the github repo where is the central app database located
 DATABASE_API_URL="https://api.github.com/repos/PavelDobCZ23/Portable-Linux-App-Manager/contents/database"
 #* directory where the subdirectories of apps' files are located, value of -d arg
@@ -142,12 +148,15 @@ get_app_executable () {
 
 # Echos icon of the app. Takes: app name($1), config subsection($2).
 get_app_icon () {
-  local ICON_APP_NAME SUBSECTION ICON_CONFIG
+  local ICON_APP_NAME SUBSECTION ICON_CONFIG APP_ID
   ICON_APP_NAME="$1"
   SUBSECTION="$2"
   ICON_CONFIG=$(get_app_config "$ICON_APP_NAME" "Desktop" "$SUBSECTION" "Icon")
   if [[ $ICON_CONFIG =~ ^\.\/ ]]; then
     ICON_CONFIG="$APPS_DIRECTORY/$ICON_APP_NAME/${ICON_CONFIG:2}"
+  elif [[ -z $ICON_CONFIG ]]; then
+    APP_ID=$(get_app_config "$ICON_APP_NAME" "General" "" "AppId")
+    ICON_CONFIG="x-portable-icon-$APP_ID"
   fi
   echo "$ICON_CONFIG"
 }
@@ -266,6 +275,38 @@ update_app () {
   send_info "Done updating!"
 }
 
+process_app_icons () {
+  local ICONS_APP_NAME ICONS_DIR ICON_NAME ICON_PATH RES RES_NAME ICON_DEST_NAME APP_ID ICON_FORMAT FILE_TYPE
+  ICONS_APP_NAME="$1"
+  ICONS_DIR="$APPS_DIRECTORY/$ICONS_APP_NAME"
+  for ICON_PATH in "$ICONS_DIR"/app-icon*.*; do
+    FILE_TYPE=$(file -b "$ICON_PATH")
+    ICON_NAME=$(basename "$ICON_PATH")
+    if [[ $ICON_NAME =~ \.png$ ]]; then
+      RES=$(echo "$ICON_NAME" | grep -o -E '[[:digit:]]*\.png$' | grep -o -E '[[:digit:]]*')
+      RES_NAME="${RES}x${RES}"
+      ICON_FORMAT="png"
+      if [[ ! "$FILE_TYPE" =~ ^PNG\ image\ data,\ $RES\ x\ $RES ]]; then 
+        send_error "The icon file '$ICON_PATH' isn't of type PNG or has a wrong resolution! File type: '$FILE_TYPE'"
+      fi
+    elif [[ $ICON_NAME =~ \.svg$ ]]; then
+      RES_NAME="scalable"
+      ICON_FORMAT="svg"
+      if [[ ! "$FILE_TYPE" =~ ^SVG ]]; then 
+        send_error "The icon file '$ICON_PATH' isn't of type SVG! File type: '$FILE_TYPE'"
+      fi
+    else
+      send_info "Invalid icon provided! '$ICON_NAME'"
+    fi
+    APP_ID=$(get_app_config "$EXEC_APP_NAME" "General" "" "AppId")
+    ICON_DEST_NAME="$RES_NAME/x-portable-icon-$APP_ID.$ICON_FORMAT"
+    cp --parents -f "$ICON_PATH" "$ICON_FILES_DIR/$ICON_DEST_NAME"
+  done
+  #this is useful
+  #find /home/pavel/.local/share/icons/hicolor -type f -regex '.*/x-portable-icon-discord\.\(svg\|png\)'
+
+}
+
 app_desktop () {
   local BASE_DESKTOP_FILE DESKTOP_FILE_DIR FILE_NAME OUTPUT_DESKTOP_FILE LINE LAST_SECTION
   # Check if the app's valid
@@ -274,7 +315,7 @@ app_desktop () {
   fi
   # Prepare variables
   BASE_DESKTOP_FILE="$APPS_DIRECTORY/$APP_NAME/app.desktop"
-  DESKTOP_FILE_DIR="$HOME/.local/share/applications/Portable"
+  DESKTOP_FILE_DIR="$DESKTOP_FILES_DIR/Portable"
   CUSTOM_FILE_NAME=$(get_app_config "$APP_NAME" "Desktop" "" "FileName")
   if [[ -z $CUSTOM_FILE_NAME ]]; 
   then FILE_NAME="$APP_NAME.desktop"

@@ -33,7 +33,7 @@ get_url () {
     for ASSET_NAME in $(echo "$RELEASE_DATA" | jq -r '.assets[].name');
     do
         INDEX_COUNTER=$(("$INDEX_COUNTER" + 1))
-        if [[ $ASSET_NAME =~ Blockbench_.*\.AppImage ]];
+        if [[ $ASSET_NAME =~ Blockbench_.*\.AppImage ]];    
         then
             echo "$RELEASE_DATA" | jq -r ".assets[$INDEX_COUNTER].browser_download_url" && exit
         fi
