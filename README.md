@@ -1,6 +1,6 @@
-# Portable Linux App Manager (portappm)
+# Automated Desktop Integration for Portables apps (on GNU/Linux) - **adip**
 
-A complex bash script for management of apps distributed in formats that aren't easy to integrate like AppImage or binaries in tar archives.
+A complex bash script for management of apps distributed in formats, that aren't easy to integrate, like AppImage or binaries in tar archives.
 
 ## Features
 
@@ -11,7 +11,7 @@ A complex bash script for management of apps distributed in formats that aren't 
 
 ## Usage
 
-`./portappm -c <COMMAND> -a <APP> -d <APPS_DIRECTORY>`
+`./adip -c <COMMAND> -a <APP> -d <APPS_DIRECTORY>`
 ```
   
   -a <APP>
@@ -35,3 +35,6 @@ A complex bash script for management of apps distributed in formats that aren't 
     "add"
       required -a <APP> passed. It creates default files to fill out to add a brand new app.
 ```
+
+## Notes
+Some of the apps that we may distribute, have their own automated update mechanisms, in that case, you can disable updates and

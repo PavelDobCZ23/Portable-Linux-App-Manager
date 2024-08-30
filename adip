@@ -10,7 +10,7 @@ ICON_FILES_DIR="$DATA_DIR/icons/hicolor"
 DATABASE_API_URL="https://api.github.com/repos/PavelDobCZ23/Portable-Linux-App-Manager/contents/database"
 #* directory where the subdirectories of apps' files are located, value of -d arg
 APPS_DIRECTORY=""
-#* value of -c arg
+#* the action to make, value of -c arg
 COMMAND=""
 #* global variable used to indicate the name of the app in current context, all functions should use it as their target, value of -a arg
 APP_NAME=""
@@ -18,6 +18,10 @@ APP_NAME=""
 FORCE_OPTION=false
 #* List of meta files (excludes other files like icon.* or readme.*)
 META_FILES=("app.conf" "app-update.sh" "app.desktop" "install.sh" "remove.sh")
+#* List of all accepted png resolutions
+VALID_PNG_RES=("16" "20" "24" "32" "48" "64" "96" "128" "192" "256")
+#* Name of the binary of this script.
+BIN_NAME="adip" # Automated Desktop Integration for Portable apps (on GNU/Linux)
 
 # Get cli flags
 while getopts "fc:a:d:" OPT; do
@@ -65,6 +69,10 @@ path_depth() {
 # Removes given folder, but prevents dangerous rm -rf!
 remove_folder () {
   local REMOVE_PATH="$1"
+  echo "The following action will forcefully remove all contents of directory '$REMOVE_PATH'!"
+  echo "Is that alright? [y/N]"
+  read -r CONFIRM
+  if [[ $CONFIRM != [yY] ]]; then echo "Cancelled." && exit 0; fi
   if [[ $(path_depth "$REMOVE_PATH") -lt 3 ]]; then
     echo "Can't remove '$REMOVE_PATH', dangerous 'rm -rf' detected!"
   else
@@ -156,7 +164,7 @@ get_app_icon () {
     ICON_CONFIG="$APPS_DIRECTORY/$ICON_APP_NAME/${ICON_CONFIG:2}"
   elif [[ -z $ICON_CONFIG ]]; then
     APP_ID=$(get_app_config "$ICON_APP_NAME" "General" "" "AppId")
-    ICON_CONFIG="x-portable-icon-$APP_ID"
+    ICON_CONFIG="portable-icon-$APP_ID"
   fi
   echo "$ICON_CONFIG"
 }
@@ -200,6 +208,7 @@ update_app () {
   FORCED_VERSION=$(get_app_config "$APP_NAME" "General" "" "ForceVersion")
   APP_TYPE=$(get_app_config "$APP_NAME" "General" "" "Type")
 
+  # Base checks
   if [[ "$FORCE_OPTION" = false && "$DISABLE_UPDATES" = true ]]; then
     send_info "Updates are disabled in 'app.conf' for this app. Use -f to force the update."
     return 0
@@ -224,21 +233,21 @@ update_app () {
     send_info "Up To Date! Version: $LATEST_VERSION"
     return 0
   fi
-  # Continue if an update is available
+  # Continue, if an update is available
   echo "$APP_NAME | New version found! $LATEST_VERSION (Installed version: $INSTALLED_VERSION)"
   DOWNLOAD_URL="$("$UPDATE_SCRIPT" -u "$FORCED_VERSION")"
   if [[ -z $DOWNLOAD_URL ]]; then
-    send_error "Failed to get the download URL for the app!"
+    send_error "Failed to get the download URL for the app! Updating metadata might fix the issue, try running: $BIN_NAME -c refresh \"$APP_NAME\""
   elif [[ $DOWNLOAD_URL =~ ^Fatal\ Error\!.*$ ]]; then
     send_error "$DOWNLOAD_URL"
   fi
 
-  # Download the update and return if it fails
+  # Download the update, and return if it fails
   echo "$APP_NAME | Downloading new version from '$DOWNLOAD_URL'."
   TEMP_FILE="$APP_DIR/temp-download-file"
   FULL_BIN_PATH="$APP_DIR/$BIN_PATH"
   if ! wget --progress bar "$DOWNLOAD_URL" -O "$TEMP_FILE"; then
-    send_error "Failed to download."
+    send_error "Failed to download. Updating metadata might fix the issue, try running: $BIN_NAME -c refresh \"$APP_NAME\""
   fi
 
   # Remove Before Update
@@ -275,36 +284,49 @@ update_app () {
   send_info "Done updating!"
 }
 
+#? maybe even check if resolution is valid (ie 16,20...256)
+
 process_app_icons () {
-  local ICONS_APP_NAME ICONS_DIR ICON_NAME ICON_PATH RES RES_NAME ICON_DEST_NAME APP_ID ICON_FORMAT FILE_TYPE
-  ICONS_APP_NAME="$1"
-  ICONS_DIR="$APPS_DIRECTORY/$ICONS_APP_NAME"
+  local ICONS_DIR ICON_NAME ICON_PATH RES RES_NAME ICON_DEST_NAME APP_ID ICON_FORMAT FILE_TYPE VALID_RES_FOUND
+  ICONS_DIR="$APPS_DIRECTORY/$APP_NAME"
+  # Loops all icons provided for the app. Name format: app-icon.svg or app-icon-16x16.png
   for ICON_PATH in "$ICONS_DIR"/app-icon*.*; do
     FILE_TYPE=$(file -b "$ICON_PATH")
     ICON_NAME=$(basename "$ICON_PATH")
+    # Prepares resolution of PNG, and confirms it's valid.
     if [[ $ICON_NAME =~ \.png$ ]]; then
       RES=$(echo "$ICON_NAME" | grep -o -E '[[:digit:]]*\.png$' | grep -o -E '[[:digit:]]*')
       RES_NAME="${RES}x${RES}"
       ICON_FORMAT="png"
+      # Check for valid format
       if [[ ! "$FILE_TYPE" =~ ^PNG\ image\ data,\ $RES\ x\ $RES ]]; then 
         send_error "The icon file '$ICON_PATH' isn't of type PNG or has a wrong resolution! File type: '$FILE_TYPE'"
       fi
+      # Check for valid resolution
+      for VALID_RES in "${VALID_PNG_RES[@]}"; do
+        if [[ $VALID_RES == "$RES" ]]; then
+          VALID_RES_FOUND=1
+        fi
+      done
+      if [[ $VALID_RES_FOUND != 1 ]]; then
+        continue
+      fi
+    # Prepares SVG, and confirms it's valid.
     elif [[ $ICON_NAME =~ \.svg$ ]]; then
       RES_NAME="scalable"
       ICON_FORMAT="svg"
+      # Check for valid format
       if [[ ! "$FILE_TYPE" =~ ^SVG ]]; then 
         send_error "The icon file '$ICON_PATH' isn't of type SVG! File type: '$FILE_TYPE'"
       fi
     else
       send_info "Invalid icon provided! '$ICON_NAME'"
     fi
+    # Copies the icon to appropriate location.
     APP_ID=$(get_app_config "$EXEC_APP_NAME" "General" "" "AppId")
-    ICON_DEST_NAME="$RES_NAME/x-portable-icon-$APP_ID.$ICON_FORMAT"
+    ICON_DEST_NAME="$RES_NAME/portable-icon-$APP_ID.$ICON_FORMAT"
     cp --parents -f "$ICON_PATH" "$ICON_FILES_DIR/$ICON_DEST_NAME"
   done
-  #this is useful
-  #find /home/pavel/.local/share/icons/hicolor -type f -regex '.*/x-portable-icon-discord\.\(svg\|png\)'
-
 }
 
 app_desktop () {
@@ -324,6 +346,9 @@ app_desktop () {
   OUTPUT_DESKTOP_FILE="$DESKTOP_FILE_DIR/$FILE_NAME"
   LINE=""
   LAST_SECTION=""
+
+  # Prepare icons
+  process_app_icons
 
   # Go through each line of the base desktop file
   echo -n > "$OUTPUT_DESKTOP_FILE"
@@ -352,7 +377,7 @@ app_desktop () {
     if [[ $SECTION == "Desktop Entry" ]]; then
       if [[ $KEY == "Icon" || $KEY == "Exec" || $KEY == "Type" || $KEY == "Path" ]]; then continue; fi # Skip generated keys
     elif [[ $SECTION =~ ^Desktop\ Action\ .*$ ]]; then
-      if [[ $KEY == "Exec" ]];then continue; fi
+      if [[ $KEY == "Exec" ]]; then continue; fi
     fi
     echo "$KEY=$VALUE" >> "$OUTPUT_DESKTOP_FILE"
   done < <(grep "" "$BASE_DESKTOP_FILE")
@@ -366,6 +391,12 @@ refresh_app() {
   # Check if the app's valid
   if ! check_valid_app "$APP_NAME"; then 
     send_error "Not a valid app, can't refresh meta files!"
+  fi
+  # Check if refreshing is disabled
+  DISABLE_REFRESH=$(get_app_config "$APP_NAME" "General" "" "DisableRefresh")
+  if [[ $DISABLE_REFRESH == "true" ]]; then 
+    echo "Refresh disabled in 'app.conf' of '$APP_NAME'"
+    return 1
   fi
   # Prepare variables
   APP_ID=$(get_app_config "$APP_NAME" "General" "" "AppId") 
@@ -388,7 +419,7 @@ refresh_app() {
     wget --progress bar "$DOWNLOAD_URL" -O "$APP_DIR/$FILE_NAME"
     if [[ $FILE_NAME =~ \.sh$ ]]; then chmod +x "$APP_DIR/$FILE_NAME"; fi
   done
-  echo "Done! Meta files are now synced up with the latest in the repo's database."
+  echo "Done! Meta files are now synced up with the latest from the repo's database."
 }
 
 refresh_all_apps () {
@@ -531,10 +562,17 @@ remove_app () {
   else
     echo "Invalid choice! Cancelled." && exit 1
   fi
-  # Remove the app
-
-  if [[ -x "$APP_DIR/app-remove.sh" ]]; then "$APP_DIR/app-remove.sh"; fi # Run custom post-remove script
-  rm -f "$APP_DIR/app-remove.sh"
+  # Run custom pre-remove script
+  if [[ -x "$APP_DIR/app-remove.sh" ]]; then 
+    "$APP_DIR/app-remove.sh"; 
+  fi 
+  # Remove icons
+  APP_ID=$(get_app_config "$APP_NAME" "General" "" "AppId")
+  ICON_FILE_PATTERN="$ICON_FILES_DIR/*/apps/portable-icon-$APP_ID.*"
+  rm -f "$ICON_FILE_PATTERN"
+  # Remove the app (metadata)
+  APP_DIR="$APPS_DIRECTORY/$APP_NAME"
+  remove_folder "$APP_DIR"
 }
 
 # Forces reinstallation of the app
@@ -555,8 +593,7 @@ reinstall_app () {
 
 run_app () {
   APP_EXEC=$(get_app_executable "$APP_NAME")
-  echo "Running:"
-  echo "$APP_EXEC"
+  echo "Running: $APP_EXEC"
   eval "$APP_EXEC"
 }
 
